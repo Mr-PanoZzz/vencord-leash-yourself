@@ -2,9 +2,9 @@
 
 Leash yourself to another user and be pulled into their voice channel
 
-![](https://imgur.com/11AzJnF)
+![](https://i.imgur.com/11AzJnF.png)
 
-![](https://imgur.com/eLBNq2r)
+![](https://i.imgur.com/eLBNq2r.png)
 
 ## Installation guide
 
