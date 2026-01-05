@@ -223,9 +223,9 @@ function triggerLeashPull(targetChannelId = getChannelId(settings.store.handlerU
 
     } else {
         Toasts.show({
-            message: "Leash inactive — handler not in VC",
+            message: "Your handler is not in a voice channel",
             id: Toasts.genId(),
-            type: Toasts.Type.INFO
+            type: Toasts.Type.FAILURE
         });
     }
 }
