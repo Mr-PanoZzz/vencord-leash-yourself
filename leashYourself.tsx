@@ -11,16 +11,7 @@ import { classes } from "@utils/misc";
 import definePlugin, { OptionType } from "@utils/types";
 import type { Channel, User } from "@vencord/discord-types";
 import { findByPropsLazy, findComponentByCodeLazy, findStoreLazy } from "@webpack";
-import {
-    ChannelStore,
-    Menu,
-    PermissionsBits,
-    PermissionStore,
-    React,
-    SelectedChannelStore,
-    Toasts,
-    UserStore
-} from "@webpack/common";
+import { ChannelStore, Menu, PermissionsBits, PermissionStore, React, SelectedChannelStore, Toasts, UserStore } from "@webpack/common";
 import type { PropsWithChildren, SVGProps } from "react";
 
 const HeaderBarIcon = findComponentByCodeLazy(".HEADER_BAR_BADGE_TOP:", '.iconBadge,"top"');
@@ -87,6 +78,21 @@ function UnleashIcon(props: IconProps) {
     );
 }
 
+interface VoiceState {
+    userId: string;
+    channelId?: string;
+    oldChannelId?: string;
+    deaf: boolean;
+    mute: boolean;
+    selfDeaf: boolean;
+    selfMute: boolean;
+    selfStream: boolean;
+    selfVideo: boolean;
+    sessionId: string;
+    suppress: boolean;
+    requestToSpeakTimestamp: string | null;
+}
+
 export const settings = definePluginSettings({
     pullOnLeashSet: {
         type: OptionType.BOOLEAN,
@@ -121,88 +127,137 @@ export const settings = definePluginSettings({
     }
 });
 
-const ChannelActions = findByPropsLazy("disconnect", "selectVoiceChannel");
-const VoiceStateStore = findStoreLazy("VoiceStateStore");
+const ChannelActions: {
+    disconnect: () => void;
+    selectVoiceChannel: (channelId: string) => void;
+} = findByPropsLazy("disconnect", "selectVoiceChannel");
+
+const VoiceStateStore: VoiceStateStore = findStoreLazy("VoiceStateStore");
 const CONNECT = 1n << 20n;
 
-function getUserChannel(userId: string) {
-    if (!userId) return null;
-    const states = VoiceStateStore.getAllVoiceStates();
-    for (const guild of Object.values(states)) {
-        if (guild[userId]) return guild[userId].channelId ?? null;
+interface VoiceStateStore {
+    getAllVoiceStates(): VoiceStateEntry;
+    getVoiceStatesForChannel(channelId: string): VoiceStateMember;
+}
+
+interface VoiceStateEntry {
+    [guildIdOrMe: string]: VoiceStateMember;
+}
+
+interface VoiceStateMember {
+    [userId: string]: VoiceState;
+}
+
+function getChannelId(userId: string) {
+    if (!userId) {
+        return null;
     }
+    try {
+        const states = VoiceStateStore.getAllVoiceStates();
+        for (const users of Object.values(states)) {
+            if (users[userId]) {
+                return users[userId].channelId ?? null;
+            }
+        }
+    } catch (e) { }
     return null;
 }
 
-function triggerLeashPull(targetChannel = getUserChannel(settings.store.handlerUserId)) {
-    if (!settings.store.handlerUserId) return;
+function triggerLeashPull(targetChannelId = getChannelId(settings.store.handlerUserId)) {
+    if (settings.store.handlerUserId) {
+        const myChanId = SelectedChannelStore.getVoiceChannelId();
 
-    const myChannel = SelectedChannelStore.getVoiceChannelId();
+        if (targetChannelId) {
+            if (targetChannelId !== myChanId) {
+                const channel = ChannelStore.getChannel(targetChannelId);
+                const voiceStates = VoiceStateStore.getVoiceStatesForChannel(targetChannelId);
+                const memberCount = voiceStates ? Object.keys(voiceStates).length : null;
 
-    if (targetChannel) {
-        if (targetChannel === myChannel) {
+                if (channel.type === 1 || PermissionStore.can(CONNECT, channel)) {
+                    if (channel.userLimit !== 0 && memberCount !== null && memberCount >= channel.userLimit && !PermissionStore.can(PermissionsBits.MOVE_MEMBERS, channel)) {
+                        Toasts.show({
+                            message: "Handler’s channel is full",
+                            id: Toasts.genId(),
+                            type: Toasts.Type.FAILURE
+                        });
+                        return;
+                    }
+
+                    ChannelActions.selectVoiceChannel(targetChannelId);
+                    Toasts.show({
+                        message: "Your handler pulled you into their voice channel",
+                        id: Toasts.genId(),
+                        type: Toasts.Type.SUCCESS
+                    });
+                } else {
+                    Toasts.show({
+                        message: "Insufficient permissions to enter your handler's voice channel",
+                        id: Toasts.genId(),
+                        type: Toasts.Type.FAILURE
+                    });
+                }
+            } else {
+                Toasts.show({
+                    message: "You are already with your handler",
+                    id: Toasts.genId(),
+                    type: Toasts.Type.FAILURE
+                });
+            }
+        } else if (myChanId) {
+            if (settings.store.followLeave) {
+                ChannelActions.disconnect();
+                Toasts.show({
+                    message: "Your handler left and took you with them",
+                    id: Toasts.genId(),
+                    type: Toasts.Type.SUCCESS
+                });
+            } else {
+                Toasts.show({
+                    message: "Your handler left — leash released",
+                    id: Toasts.genId(),
+                    type: Toasts.Type.FAILURE
+                });
+            }
+        } else {
             Toasts.show({
-                message: "You are already with your handler",
+                message: "Your handler is not in a voice channel",
                 id: Toasts.genId(),
                 type: Toasts.Type.FAILURE
             });
-            return;
         }
-
-        const channel = ChannelStore.getChannel(targetChannel);
-        const voiceStates = VoiceStateStore.getVoiceStatesForChannel(targetChannel);
-        const count = voiceStates ? Object.keys(voiceStates).length : 0;
-
-        if (
-            channel.userLimit &&
-            count >= channel.userLimit &&
-            !PermissionStore.can(PermissionsBits.MOVE_MEMBERS, channel)
-        ) {
-            Toasts.show({
-                message: "Handler’s channel is full",
-                id: Toasts.genId(),
-                type: Toasts.Type.FAILURE
-            });
-            return;
-        }
-
-        ChannelActions.selectVoiceChannel(targetChannel);
-        Toasts.show({
-            message: "Your handler pulled you into their voice channel",
-            id: Toasts.genId(),
-            type: Toasts.Type.SUCCESS
-        });
-    } else if (myChannel && settings.store.leashReleaseOnLeave) {
-        ChannelActions.disconnect();
-        Toasts.show({
-            message: "Your handler left — leash released",
-            id: Toasts.genId(),
-            type: Toasts.Type.SUCCESS
-        });
     }
 }
 
 function toggleLeash(userId: string) {
-    settings.store.handlerUserId =
-        settings.store.handlerUserId === userId ? "" : userId;
-
-    if (settings.store.handlerUserId && settings.store.pullOnLeashSet) {
-        triggerLeashPull();
+    if (settings.store.handlerUserId === userId) {
+        settings.store.handlerUserId = "";
+    } else {
+        settings.store.handlerUserId = userId;
+        if (settings.store.pullOnLeashSet) {
+            triggerLeashPull();
+        }
     }
 }
 
-const UserContext: NavContextMenuPatchCallback = (children, { user }) => {
-    if (!user || user.id === UserStore.getCurrentUser().id) return;
+interface UserContextProps {
+    channel: Channel;
+    guildId?: string;
+    user: User;
+}
 
+const UserContext: NavContextMenuPatchCallback = (children, { user }: UserContextProps) => {
+    if (!user || user.id === UserStore.getCurrentUser().id) return;
     const isLeashed = settings.store.handlerUserId === user.id;
+    const label = isLeashed ? "Unleash" : "Leash Yourself to User";
+    const icon = isLeashed ? UnleashIcon : CollarIcon;
 
     children.splice(-1, 0, (
         <Menu.MenuGroup>
             <Menu.MenuItem
                 id="leash-yourself"
-                label={isLeashed ? "Unleash" : "Leash Yourself to User"}
+                label={label}
                 action={() => toggleLeash(user.id)}
-                icon={isLeashed ? UnleashIcon : CollarIcon}
+                icon={icon}
             />
         </Menu.MenuGroup>
     ));
@@ -214,44 +269,96 @@ export default definePlugin({
     authors: [{ name: "Mr_PanoZzz", id: 939129546551210056n }],
 
     settings,
-    contextMenus: { "user-context": UserContext },
+
+    patches: [
+        {
+            find: ".controlButtonWrapper,",
+            replacement: {
+                match: /(function \i\(\i\){)(.{1,200}toolbar.{1,100}mobileToolbar)/,
+                replace: "$1$self.addIconToToolBar(arguments[0]);$2"
+            }
+        },
+    ],
+
+    contextMenus: {
+        "user-context": UserContext
+    },
 
     flux: {
-        VOICE_STATE_UPDATES({ voiceStates }) {
-            if (settings.store.onlyManualTrigger || !settings.store.handlerUserId) return;
-
+        VOICE_STATE_UPDATES({ voiceStates }: { voiceStates: VoiceState[]; }) {
+            if (settings.store.onlyManualTrigger || !settings.store.handlerUserId) {
+                return;
+            }
             for (const { userId, channelId, oldChannelId } of voiceStates) {
-                if (userId === settings.store.handlerUserId && channelId !== oldChannelId) {
-                    triggerLeashPull(channelId ?? null);
+                if (channelId !== oldChannelId) {
+                    const isMe = userId === UserStore.getCurrentUser().id;
+                    if (settings.store.autoMoveBack && isMe && channelId && oldChannelId) {
+                        triggerLeashPull();
+                        continue;
+                    }
+
+                    if (settings.store.channelFull && !isMe && !channelId && oldChannelId && oldChannelId !== SelectedChannelStore.getVoiceChannelId()) {
+                        const channel = ChannelStore.getChannel(oldChannelId);
+                        const channelVoiceStates = VoiceStateStore.getVoiceStatesForChannel(oldChannelId);
+                        const memberCount = channelVoiceStates ? Object.keys(channelVoiceStates).length : null;
+                        if (channel.userLimit !== 0 && memberCount !== null && memberCount === (channel.userLimit - 1) && !PermissionStore.can(PermissionsBits.MOVE_MEMBERS, channel)) {
+                            const users = Object.values(channelVoiceStates).map(x => x.userId);
+                            if (users.includes(settings.store.handlerUserId)) {
+                                triggerLeashPull(oldChannelId);
+                                continue;
+                            }
+                        }
+                    }
+
+                    const isLeashed = settings.store.handlerUserId === userId;
+                    if (!isLeashed) {
+                        continue;
+                    }
+
+                    if (channelId) {
+                        triggerLeashPull(channelId);
+                    } else if (oldChannelId) {
+                        triggerLeashPull(null);
+                    }
                 }
             }
-        }
+        },
     },
 
     LeashIndicator() {
-        const { plugins: { LeashYourself: { handlerUserId } } } =
-            useSettings(["plugins.LeashYourself.handlerUserId"]);
+        const { plugins: { FollowUser: { handlerUserId } } } = useSettings(["plugins.LeashYourself.handlerUserId"]);
+        if (handlerUserId) {
+            return (
+                <HeaderBarIcon
+                    tooltip={`Leashed to ${UserStore.getUser(handlerUserId).username} — click to pull, right-click to unleash`}
+                    icon={UnleashIcon}
+                    onClick={() => {
+                        triggerLeashPull();
+                    }}
+                    onContextMenu={() => {
+                        settings.store.handlerUserId = "";
+                    }}
+                />
+            );
+        }
 
-        if (!handlerUserId) return null;
-
-        return (
-            <HeaderBarIcon
-                tooltip={`Leashed to ${UserStore.getUser(handlerUserId).username} — click to pull, right-click to unleash`}
-                icon={CollarIcon}
-                onClick={() => triggerLeashPull()}
-                onContextMenu={() => (settings.store.handlerUserId = "")}
-            />
-        );
+        return null;
     },
 
-    addIconToToolBar(e) {
-        const icon = (
-            <ErrorBoundary noop key="leash-indicator">
-                <this.LeashIndicator />
-            </ErrorBoundary>
-        );
+    addIconToToolBar(e: { toolbar: React.ReactNode[] | React.ReactNode; }) {
+        if (Array.isArray(e.toolbar)) {
+            return e.toolbar.unshift(
+                <ErrorBoundary noop={true} key="leash-indicator">
+                    <this.LeashIndicator/>
+                </ErrorBoundary>
+            );
+        }
 
-        if (Array.isArray(e.toolbar)) e.toolbar.unshift(icon);
-        else e.toolbar = [icon, e.toolbar];
-    }
+        e.toolbar = [
+            <ErrorBoundary noop={true} key="leash-indicator">
+                <this.LeashIndicator />
+            </ErrorBoundary>,
+            e.toolbar,
+        ];
+    },
 });
