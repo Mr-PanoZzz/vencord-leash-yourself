@@ -204,7 +204,7 @@ function triggerLeashPull(targetChannelId = getChannelId(settings.store.handlerU
                 });
             }
         } else if (myChanId) {
-            if (settings.store.followLeave) {
+            if (settings.store.leashReleaseOnLeave) {
                 ChannelActions.disconnect();
                 Toasts.show({
                     message: "Your handler left and took you with them",
@@ -326,7 +326,7 @@ export default definePlugin({
     },
 
     LeashIndicator() {
-        const { plugins: { FollowUser: { handlerUserId } } } = useSettings(["plugins.LeashYourself.handlerUserId"]);
+        const { plugins: { leashReleaseOnLeave: { handlerUserId } } } = useSettings(["plugins.LeashYourself.handlerUserId"]);
         if (handlerUserId) {
             return (
                 <HeaderBarIcon
