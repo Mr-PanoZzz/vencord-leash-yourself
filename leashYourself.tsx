@@ -11,7 +11,16 @@ import { classes } from "@utils/misc";
 import definePlugin, { OptionType } from "@utils/types";
 import type { Channel, User } from "@vencord/discord-types";
 import { findByPropsLazy, findComponentByCodeLazy, findStoreLazy } from "@webpack";
-import { ChannelStore, Menu, PermissionsBits, PermissionStore, React, SelectedChannelStore, Toasts, UserStore } from "@webpack/common";
+import {
+    ChannelStore,
+    Menu,
+    PermissionsBits,
+    PermissionStore,
+    React,
+    SelectedChannelStore,
+    Toasts,
+    UserStore
+} from "@webpack/common";
 import type { PropsWithChildren, SVGProps } from "react";
 
 const HeaderBarIcon = findComponentByCodeLazy(".HEADER_BAR_BADGE_TOP:", '.iconBadge,"top"');
@@ -165,9 +174,7 @@ function getChannelId(userId: string) {
 
 function triggerLeashPull(targetChannelId = getChannelId(settings.store.handlerUserId)) {
     if (!settings.store.handlerUserId) return;
-
     const myChanId = SelectedChannelStore.getVoiceChannelId();
-
     if (targetChannelId) {
         if (targetChannelId !== myChanId) {
             const channel = ChannelStore.getChannel(targetChannelId);
