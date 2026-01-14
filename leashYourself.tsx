@@ -172,68 +172,65 @@ function getChannelId(userId: string) {
     return null;
 }
 
-function triggerLeashPull(targetChannelId = getChannelId(settings.store.handlerUserId)) {
-    if (!settings.store.handlerUserId) return;
-    const myChanId = SelectedChannelStore.getVoiceChannelId();
-    if (targetChannelId) {
-        if (targetChannelId !== myChanId) {
-            const channel = ChannelStore.getChannel(targetChannelId);
-            const voiceStates = VoiceStateStore.getVoiceStatesForChannel(targetChannelId);
-            const memberCount = voiceStates ? Object.keys(voiceStates).length : null;
-
-            if (channel.type === 1 || PermissionStore.can(CONNECT, channel)) {
-                if (channel.userLimit !== 0 && memberCount !== null && memberCount >= channel.userLimit && !PermissionStore.can(PermissionsBits.MOVE_MEMBERS, channel)) {
+function triggerLeashPull(targetChannelId: string | null = getChannelId(settings.store.handlerUserId)) {
+    if (settings.store.handlerUserId) {
+        const myChanId = SelectedChannelStore.getVoiceChannelId();
+        if (targetChannelId) {
+            if (targetChannelId !== myChanId) {
+                const channel = ChannelStore.getChannel(targetChannelId);
+                const voiceStates = VoiceStateStore.getVoiceStatesForChannel(targetChannelId);
+                const memberCount = voiceStates ? Object.keys(voiceStates).length : null;
+                if (channel.type === 1 || PermissionStore.can(CONNECT, channel)) {
+                    if (channel.userLimit !== 0 && memberCount !== null && memberCount >= channel.userLimit && !PermissionStore.can(PermissionsBits.MOVE_MEMBERS, channel)) {
+                        Toasts.show({
+                            message: "Handler’s channel is full",
+                            id: Toasts.genId(),
+                            type: Toasts.Type.FAILURE
+                        });
+                        return;
+                    }
+                    ChannelActions.selectVoiceChannel(targetChannelId);
                     Toasts.show({
-                        message: "Handler’s channel is full",
+                        message: "Your handler pulled you into their voice channel",
+                        id: Toasts.genId(),
+                    type: Toasts.Type.SUCCESS
+                    });
+                } else {
+                    Toasts.show({
+                        message: "Insufficient permissions to enter your handler's voice channel",
                         id: Toasts.genId(),
                         type: Toasts.Type.FAILURE
                     });
-                    return;
                 }
-
-                ChannelActions.selectVoiceChannel(targetChannelId);
+            } else {
                 Toasts.show({
-                    message: "Your handler pulled you into their voice channel",
+                    message: "You are already with your handler",
+                    id: Toasts.genId(),
+                    type: Toasts.Type.FAILURE
+                });
+            }
+        } else if (myChanId) {
+            if (settings.store.leashReleaseOnLeave) {
+                ChannelActions.disconnect();
+                Toasts.show({
+                    message: "Your handler left and took you with them",
                     id: Toasts.genId(),
                     type: Toasts.Type.SUCCESS
                 });
             } else {
                 Toasts.show({
-                    message: "Insufficient permissions to enter your handler's voice channel",
+                    message: "Your handler left — leash released",
                     id: Toasts.genId(),
                     type: Toasts.Type.FAILURE
                 });
             }
         } else {
             Toasts.show({
-                message: "You are already with your handler",
+                message: "Your handler is not in a voice channel",
                 id: Toasts.genId(),
                 type: Toasts.Type.FAILURE
             });
         }
-
-    } else if (myChanId) {
-        if (settings.store.leashReleaseOnLeave) {
-            ChannelActions.disconnect();
-            Toasts.show({
-                message: "Your handler left and took you with them",
-                id: Toasts.genId(),
-                type: Toasts.Type.SUCCESS
-            });
-        } else {
-            Toasts.show({
-                message: "Your handler left — leash released",
-                id: Toasts.genId(),
-                type: Toasts.Type.FAILURE
-            });
-        }
-
-    } else {
-        Toasts.show({
-            message: "Your handler is not in a voice channel",
-            id: Toasts.genId(),
-            type: Toasts.Type.FAILURE
-        });
     }
 }
 
@@ -301,7 +298,7 @@ export default definePlugin({
             for (const { userId, channelId, oldChannelId } of voiceStates) {
                 if (channelId !== oldChannelId) {
                     const isMe = userId === UserStore.getCurrentUser().id;
-                    if (settings.store.autoMoveBack && isMe && channelId && oldChannelId) {
+                    if (settings.store.autoPullBack && isMe && channelId && oldChannelId) {
                         triggerLeashPull();
                         continue;
                     }
